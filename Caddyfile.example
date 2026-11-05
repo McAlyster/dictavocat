@@ -1,0 +1,16 @@
+depot.example.fr {
+	encode zstd gzip
+	request_body {
+		max_size 125MB
+	}
+	 reverse_proxy 127.0.0.1:8080
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri delete
+			}
+		}
+	}
+}
