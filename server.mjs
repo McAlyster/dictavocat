@@ -14,6 +14,7 @@ const baseUrl = (env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
 const uploadToken = env.UPLOAD_TOKEN || '';
 const recipient = env.AGE_RECIPIENT || '';
 const secretaryEmail = env.SECRETARY_EMAIL || '';
+const officeName = (env.OFFICE_NAME || '').slice(0, 80);
 const mailFrom = env.MAIL_FROM || '';
 const dataDir = resolve(env.DATA_DIR || './data');
 const uploadsDir = join(dataDir, 'uploads');
@@ -96,12 +97,28 @@ async function expireOldDeposits() {
   const now = Date.now();
   let names = [];
   try { names = await readdir(metadataDir); } catch { return; }
+  const known = new Set();
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
+    known.add(name.slice(0, -5));
     try {
       const meta = JSON.parse(await readFile(join(metadataDir, name), 'utf8'));
       if (meta.expiresAt <= now) await deleteDeposit(meta);
     } catch { /* Ignore malformed metadata; do not delete the ciphertext automatically. */ }
+  }
+  // Purge leftovers from interrupted uploads or crashes: partial files and ciphertexts
+  // without metadata, once they are older than the link lifetime.
+  let uploads = [];
+  try { uploads = await readdir(uploadsDir); } catch { return; }
+  for (const name of uploads) {
+    const isPart = name.endsWith('.part');
+    const isOrphan = name.endsWith('.age') && !known.has(name.slice(0, -4));
+    if (!isPart && !isOrphan) continue;
+    try {
+      const info = await stat(join(uploadsDir, name));
+      const maxAge = isPart ? 60 * 60 * 1000 : linkTtlMs;
+      if (now - info.mtimeMs > maxAge) await rm(join(uploadsDir, name), { force: true });
+    } catch { /* ignore */ }
   }
 }
 
@@ -113,11 +130,12 @@ const server = createServer(async (req, res) => {
   res.setHeader('X-Frame-Options', 'DENY');
 
   if (req.method === 'GET' && pathname === '/api/config') {
-    return json(res, 200, { recipient, maxUploadBytes });
+    return json(res, 200, { recipient, maxUploadBytes, officeName });
   }
 
   if (req.method === 'POST' && pathname === '/api/uploads') {
-    const supplied = req.headers['x-upload-token'];
+    const auth = req.headers.authorization;
+    const supplied = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null;
     const good = typeof supplied === 'string' && safeEqualHex(hashToken(supplied).toString('hex'), hashToken(uploadToken).toString('hex'));
     if (!good) return clientError(res, 401, 'Lien de dépôt invalide.');
     const contentLength = Number(req.headers['content-length'] || 0);
@@ -154,7 +172,7 @@ const server = createServer(async (req, res) => {
           from: mailFrom,
           to: secretaryEmail,
           subject: 'Nouveau dépôt de notes vocales',
-          text: `Un nouveau dépôt chiffré est disponible.\n\nTélécharger le fichier chiffré (lien temporaire, au plus ${maxDownloads} téléchargements) :\n${link}\n\nLe contenu doit être déchiffré localement avec votre clé privée age.`,
+          text: `Un nouveau dépôt est disponible.\n\nOuvrez ce lien, choisissez votre fichier clé et saisissez votre phrase secrète :\n${link}\n\nLe lien est valable ${Math.round(linkTtlMs / 3600000)} heures et peut servir ${maxDownloads} fois.`,
           disableFileAccess: true,
           disableUrlAccess: true
         });

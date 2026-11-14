@@ -4,3 +4,8 @@ node_modules
 dist
 data
 *.log
+cles
+tools
+documents
+.DS_Store
+Claude outputs

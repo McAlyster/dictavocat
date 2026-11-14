@@ -8,9 +8,9 @@ Ce MVP n'a pas encore fait l'objet d'une revue de sécurité ni d'essais d'inté
 
 ## Préparer la clé de la secrétaire
 
-Sur le poste de la secrétaire, installer le client `age`, puis créer la clé privée avec `age-keygen`. Conserver le fichier d'identité uniquement sur ce poste et dans une sauvegarde protégée hors du VPS. Transmettre à l'administrateur uniquement la ligne `Public key: age1...`.
+`node tools/generer-cle.mjs` crée `cles/cle-dictavocat.age`, une identité age protégée par une phrase secrète, et affiche la clé publique à mettre dans `AGE_RECIPIENT`. Transmettre le fichier et la phrase par deux canaux distincts. Une identité créée avec `age-keygen` (non protégée) est aussi acceptée.
 
-Le fichier privé est irrécupérable s'il est perdu. Tester une sauvegarde de la clé avant d'utiliser le service.
+Le fichier et sa phrase sont irrécupérables s'ils sont perdus. Conserver une sauvegarde et la tester avant d'utiliser le service.
 
 ## Configuration
 
@@ -29,25 +29,28 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Configurer le reverse proxy TLS (exemple Caddy dans `Caddyfile.example`) et limiter l'accès réseau au port 8080, qui est publié uniquement sur localhost. Pour Caddy, la limite du corps doit correspondre à `MAX_UPLOAD_BYTES` plus une marge pour les en-têtes.
+Configurer le reverse proxy TLS (exemple Caddy dans `Caddyfile.example`) et limiter l'accès réseau au port 8080, qui est publié uniquement sur localhost. Pour Caddy, la limite du corps doit être supérieure à `MAX_UPLOAD_BYTES` : Caddy compte en unités décimales (`130MB` = 130 000 000 octets) alors que la valeur par défaut de `MAX_UPLOAD_BYTES` est 120 Mio (125 829 120 octets).
+
+Le jeton de dépôt est transmis dans l'en-tête `Authorization`. Si vous utilisez un autre proxy que Caddy, vérifiez qu'il ne journalise pas cet en-tête.
 
 ## Fonctionnement et limites du MVP
 
 - L'avocate choisit les MP3/PDF, puis le navigateur fabrique une archive ZIP sans compression et la chiffre au format `age`.
 - Taille maximale par dépôt : 120 Mio par défaut. La création ZIP lit les fichiers côté navigateur et peut temporairement utiliser plusieurs fois leur taille en mémoire.
-- Le serveur vérifie l'en-tête age, stocke sous un identifiant aléatoire et envoie le courriel seulement après l'enregistrement.
+- Le navigateur vérifie la taille finale (après ZIP et chiffrement) avant l'envoi. Le serveur vérifie l'en-tête age, stocke sous un identifiant aléatoire et envoie le courriel seulement après l'enregistrement.
 - En cas d'échec SMTP, le dépôt reste enregistré et l'interface le signale, mais la notification n'est pas automatiquement renvoyée.
 - Le lien secrétaire expire après 72 h par défaut et autorise deux téléchargements terminés. Une ouverture du lien ne consomme pas d'usage ; seul le clic sur « Télécharger » envoie le jeton au serveur.
-- Une suppression automatique purge les dépôts expirés chaque minute. À la seconde utilisation, le dépôt est supprimé.
+- Une suppression automatique purge les dépôts expirés chaque minute, ainsi que les envois interrompus (`.part` de plus d'une heure) et les fichiers chiffrés orphelins. À la seconde utilisation, le dépôt est supprimé.
 - Les métadonnées et l'adresse IP peuvent apparaître dans les journaux du proxy/VPS. Ne pas activer de journaux contenant les URL complètes ou les corps de requête.
+- Le jeton de dépôt est mémorisé dans le navigateur de l'avocate (`localStorage`) après la première ouverture du lien, pour qu'une actualisation ou un favori sans jeton fonctionne. À n'utiliser que sur son propre poste.
 - Aucun compte secrétaire, antivirus, reprise d'envoi interrompu, tableau de bord ou sauvegarde n'est inclus dans ce MVP.
 
 ## Déchiffrer
 
-Télécharger le fichier `.age`, puis utiliser la clé privée sur le poste de la secrétaire :
+Par défaut, la page de téléchargement déchiffre le dépôt dans le navigateur de la secrétaire : elle choisit son fichier clé et saisit sa phrase secrète. La phrase est vérifiée **avant** le téléchargement, donc une faute de frappe ne consomme pas d'usage. Le ZIP en clair est ensuite enregistré dans *Téléchargements*. Ni la clé ni la phrase ne quittent le navigateur, mais le code de la page est servi par le VPS (voir « Avant mise en service »).
+
+Option avancée, avec l'outil `age` :
 
 ```sh
-age -d -i chemin/vers/identite.txt -o depot.zip depot.age
+age -d -i cle-dictavocat.age -o depot.zip depot.age   # demande la phrase secrète
 ```
-
-Ouvrir ensuite l'archive ZIP localement.

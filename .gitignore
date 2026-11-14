@@ -3,3 +3,7 @@ dist/
 .env
 data/
 *.log
+cles/
+documents/
+.DS_Store
+Claude outputs/

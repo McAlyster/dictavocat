@@ -1,15 +1,18 @@
 depot.example.fr {
-	encode zstd gzip
 	request_body {
-		max_size 125MB
+		# MAX_UPLOAD_BYTES (120 MiB = 125 829 120 octets) plus une marge.
+		# Caddy compte en unités décimales : 130MB = 130 000 000 octets.
+		max_size 130MB
 	}
-	 reverse_proxy 127.0.0.1:8080
+	reverse_proxy 127.0.0.1:8080
 	log {
 		output stdout
 		format filter {
 			wrap json
 			fields {
 				request>uri delete
+				request>headers>Authorization delete
+				request>headers>Cookie delete
 			}
 		}
 	}
