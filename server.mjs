@@ -15,6 +15,8 @@ const uploadToken = env.UPLOAD_TOKEN || '';
 const recipient = env.AGE_RECIPIENT || '';
 const secretaryEmail = env.SECRETARY_EMAIL || '';
 const officeName = (env.OFFICE_NAME || '').slice(0, 80);
+const supportContact = (env.SUPPORT_CONTACT || '').slice(0, 120);
+const helpText = supportContact ? `Appelez l’assistance : ${supportContact}.` : 'Appelez l’assistance.';
 const mailFrom = env.MAIL_FROM || '';
 const dataDir = resolve(env.DATA_DIR || './data');
 const uploadsDir = join(dataDir, 'uploads');
@@ -199,7 +201,7 @@ const server = createServer(async (req, res) => {
   res.setHeader('X-Frame-Options', 'DENY');
 
   if (req.method === 'GET' && pathname === '/api/config') {
-    return json(res, 200, { recipient, maxUploadBytes, officeName });
+    return json(res, 200, { recipient, maxUploadBytes, officeName, supportContact });
   }
 
   if (req.method === 'POST' && pathname === '/api/uploads') {
@@ -208,18 +210,18 @@ const server = createServer(async (req, res) => {
     const auth = req.headers.authorization;
     const supplied = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null;
     const good = typeof supplied === 'string' && safeEqualHex(hashToken(supplied).toString('hex'), hashToken(uploadToken).toString('hex'));
-    if (!good) { authFailed(ip, 'upload'); return clientError(res, 401, 'Lien de dépôt invalide.'); }
+    if (!good) { authFailed(ip, 'upload'); return clientError(res, 401, 'Raccourci non valable.'); }
     const contentLength = Number(req.headers['content-length'] || 0);
-    if (contentLength && contentLength > maxUploadBytes) return clientError(res, 413, 'Le dépôt dépasse la limite autorisée.');
+    if (contentLength && contentLength > maxUploadBytes) return clientError(res, 413, 'L’envoi est trop volumineux. Envoyez les dictées en deux fois.');
     if (activeUploads >= limits.maxConcurrent) return tooMany(res, 'Un autre envoi est en cours. Réessayez dans un instant.', 30);
     if (countRecent('upload', HOUR) >= limits.uploadsPerHour || countRecent('upload', DAY) >= limits.uploadsPerDay) {
       console.warn('rate_limited', 'upload', ip);
-      return tooMany(res, 'Le nombre maximal d’envois est atteint pour le moment. Réessayez plus tard ou prévenez l’administrateur.', 600);
+      return tooMany(res, `Le nombre maximal d’envois est atteint pour le moment. Réessayez plus tard. ${helpText}`, 600);
     }
     const usage = await storageUsage();
     if (usage.deposits >= limits.maxPending || usage.bytes + (contentLength || maxUploadBytes) > limits.maxStoredBytes) {
       console.warn('storage_full', usage.deposits, usage.bytes);
-      return clientError(res, 507, 'L’espace de stockage du service est plein. Prévenez l’administrateur.');
+      return clientError(res, 507, `Le service est momentanément plein. ${helpText}`);
     }
     record('upload');
     activeUploads++;
@@ -255,8 +257,8 @@ const server = createServer(async (req, res) => {
         await transporter.sendMail({
           from: mailFrom,
           to: secretaryEmail,
-          subject: 'Nouveau dépôt de notes vocales',
-          text: `Un nouveau dépôt est disponible.\n\nOuvrez ce lien, choisissez votre fichier clé et saisissez votre phrase secrète :\n${link}\n\nLe lien est valable ${Math.round(linkTtlMs / 3600000)} heures et peut servir ${maxDownloads} fois.`,
+          subject: 'Nouvelles dictées à récupérer',
+          text: `Bonjour,\n\n${officeName ? `${officeName} vous a envoyé` : 'Vous avez reçu'} de nouvelles dictées.\n\nPour les récupérer :\n1. cliquez sur ce lien : ${link}\n2. choisissez votre clé d’accès (fichier cle-dictavocat.age) ;\n3. tapez votre mot de passe.\n\nCe lien est valable ${Math.round(linkTtlMs / 3600000)} heures et peut servir ${maxDownloads} fois.${supportContact ? `\nEn cas de difficulté : ${supportContact}` : ''}`,
           disableFileAccess: true,
           disableUrlAccess: true
         });
@@ -267,9 +269,9 @@ const server = createServer(async (req, res) => {
       return json(res, 201, { ok: true, notificationSent });
     } catch (error) {
       await Promise.allSettled([rm(tempPath, { force: true }), rm(finalPath, { force: true })]);
-      const message = error.message === 'UPLOAD_LIMIT' ? 'Le dépôt dépasse la limite autorisée.'
-        : error.message === 'NOT_AGE' ? 'Le fichier reçu ne semble pas être une archive age chiffrée.'
-        : 'Le dépôt n’a pas pu être enregistré.';
+      const message = error.message === 'UPLOAD_LIMIT' ? 'L’envoi est trop volumineux. Envoyez les dictées en deux fois.'
+        : error.message === 'NOT_AGE' ? 'L’envoi n’est pas valide. Appuyez de nouveau sur « Envoyer ».'
+        : 'L’envoi n’a pas pu être enregistré.';
       return clientError(res, error.message === 'UPLOAD_LIMIT' ? 413 : 400, message);
     }
   }
@@ -283,8 +285,8 @@ const server = createServer(async (req, res) => {
     try { input = await readSmallJson(req); }
     catch { return clientError(res, 400, 'Requête invalide.'); }
     const meta = await loadMetadata(input?.id);
-    if (!meta || meta.expiresAt <= Date.now()) { authFailed(ip, 'download'); return clientError(res, 410, 'Lien expiré ou indisponible.'); }
-    if (typeof input?.token !== 'string' || !safeEqualHex(hashToken(input.token).toString('hex'), meta.tokenHash)) { authFailed(ip, 'download'); return clientError(res, 403, 'Lien invalide.'); }
+    if (!meta || meta.expiresAt <= Date.now()) { authFailed(ip, 'download'); return clientError(res, 410, `Ce lien a expiré (il est valable ${Math.round(linkTtlMs / 3600000)} heures et ${maxDownloads} fois). Demandez un nouvel envoi des dictées.`); }
+    if (typeof input?.token !== 'string' || !safeEqualHex(hashToken(input.token).toString('hex'), meta.tokenHash)) { authFailed(ip, 'download'); return clientError(res, 403, 'Ce lien n’est pas valable. Ouvrez-le directement depuis l’e-mail.'); }
     const used = completedDownloads.has(meta.id) ? completedDownloads.get(meta.id) : meta.downloads;
     const reserved = downloadReservations.get(meta.id) || 0;
     if (used + reserved >= maxDownloads) return clientError(res, 410, 'Le nombre de téléchargements autorisés est atteint.');

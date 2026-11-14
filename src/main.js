@@ -30,7 +30,9 @@ if (params.has('upload') || params.has('t')) history.replaceState(null, '', path
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 
-let officeName = 'Dépôt sécurisé';
+let officeName = 'Dictées du cabinet';
+let supportContact = '';
+const help = () => (supportContact ? `Appelez l’assistance : ${escapeHtml(supportContact)}.` : 'Appelez l’assistance.');
 
 // ---------- small helpers ----------
 
@@ -66,7 +68,7 @@ function page(kind, content, foot) {
     <main class="page">
       <header class="top">
         <span class="brand">${escapeHtml(officeName)}</span>
-        <span class="secure">${icons.lock}Envoi protégé</span>
+        <span class="secure">${icons.lock}Confidentiel</span>
       </header>
       <section class="card">${content}</section>
       ${foot ? `<p class="foot">${foot}</p>` : ''}
@@ -99,6 +101,7 @@ async function loadConfig() {
   if (!response.ok) throw new Error('Le service est momentanément indisponible. Réessayez dans quelques minutes.');
   const config = await response.json();
   if (config.officeName) officeName = config.officeName;
+  if (config.supportContact) supportContact = config.supportContact;
   document.title = officeName;
   return config;
 }
@@ -113,7 +116,7 @@ async function uploadPage() {
   catch (e) { page('upload', `<div class="result">${icons.warn}<h1>Service indisponible</h1><p class="lead">${escapeHtml(e.message)}</p></div>`); return; }
 
   if (!uploadToken) {
-    page('upload', `<h1>Bienvenue</h1><p class="lead">Ce service s’ouvre avec le lien personnel qui vous a été remis.<br>Utilisez le favori enregistré sur votre ordinateur.</p>`);
+    page('upload', `<h1>Bienvenue</h1><p class="lead">Pour envoyer vos dictées, branchez le dictaphone et double-cliquez sur « Envoyer mes dictées ».</p><p class="lead">${help()}</p>`);
     return;
   }
 
@@ -151,7 +154,7 @@ async function uploadPage() {
           : `${plural(files.length, 'fichier')} · ${formatBytes(total)}`}</p>
         <button type="button" class="btn btn-primary btn-big" id="send" ${tooBig ? 'disabled' : ''}>Envoyer ${files.length > 1 ? `les ${files.length} fichiers` : 'le fichier'}</button>` : ''}
       <div id="status" class="status error" role="alert">${escapeHtml(message)}</div>`,
-      'Seul votre secrétariat pourra ouvrir ces fichiers.');
+      'Confidentiel : seule votre secrétaire pourra ouvrir ces fichiers.');
 
     const input = document.querySelector('#files');
     document.querySelector('#choose').addEventListener('click', () => input.click());
@@ -227,12 +230,12 @@ async function uploadPage() {
       guardLeaving(false);
       if (error.message === 'BAD_LINK') {
         try { localStorage.removeItem(UPLOAD_KEY); } catch { /* ignore */ }
-        page('upload', `<div class="result">${icons.warn}<h1>Ce lien n’est plus valable</h1><p class="lead">Vos fichiers n’ont pas été envoyés. Contactez la personne qui a installé ce service pour obtenir un nouveau lien.</p></div>`);
+        page('upload', `<div class="result">${icons.warn}<h1>Ce raccourci ne fonctionne plus</h1><p class="lead">Vos dictées n’ont pas été envoyées. ${help()}</p></div>`);
         return;
       }
       const message = error.message === 'NETWORK' ? 'La connexion Internet semble interrompue. Vérifiez-la, puis appuyez de nouveau sur « Envoyer ». Vos fichiers sont toujours dans la liste.'
         : error.message === 'TOO_BIG' ? 'L’envoi est trop volumineux. Retirez un ou deux fichiers et envoyez-les séparément.'
-        : error.message === 'SERVER' ? 'L’envoi n’a pas abouti. Appuyez de nouveau sur « Envoyer ». Si cela se reproduit, contactez votre secrétariat.'
+        : error.message === 'SERVER' ? `L’envoi n’a pas abouti. Appuyez de nouveau sur « Envoyer ». Si cela se reproduit : ${help()}`
         : `${error.message} Appuyez de nouveau sur « Envoyer ».`;
       renderPick(message);
     }
@@ -245,8 +248,8 @@ async function uploadPage() {
         ${notified ? icons.check : icons.warn}
         <h1>${notified ? 'C’est envoyé' : 'Fichiers bien reçus'}</h1>
         <p class="lead">${notified
-          ? 'Votre secrétariat a été prévenu.'
-          : 'Les fichiers sont bien arrivés, mais le message d’alerte au secrétariat n’est pas parti. <strong>Prévenez votre secrétariat par téléphone.</strong>'}</p>
+          ? 'Votre secrétaire a été prévenue.'
+          : 'Vos dictées sont bien arrivées, mais le message pour votre secrétaire n’est pas parti. <strong>Prévenez-la par téléphone.</strong>'}</p>
         <p class="when">Le ${escapeHtml(stamp())}</p>
       </div>
       <ul class="files done" aria-label="Fichiers envoyés">${list}</ul>
@@ -265,7 +268,7 @@ async function readIdentity(file, passphrase) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let text;
   if (new TextDecoder().decode(bytes.subarray(0, 21)) === 'age-encryption.org/v1') {
-    if (!passphrase) throw new Error('Saisissez votre phrase secrète.');
+    if (!passphrase) throw new Error('Tapez votre mot de passe.');
     // Tolerate the usual typing slips: capital letters, spaces instead of dashes.
     const typed = passphrase.trim();
     const variants = [...new Set([typed, typed.toLowerCase(), typed.toLowerCase().replace(/[\s_]+/g, '-')])];
@@ -274,12 +277,12 @@ async function readIdentity(file, passphrase) {
       decrypter.addPassphrase(candidate);
       try { text = await decrypter.decrypt(bytes, 'text'); break; } catch { /* try next variant */ }
     }
-    if (!text) throw new Error('Phrase secrète incorrecte. Vérifiez-la (mots séparés par des tirets) et réessayez.');
+    if (!text) throw new Error('Mot de passe incorrect. Vérifiez-le (les mots sont séparés par des tirets) et réessayez.');
   } else {
     text = new TextDecoder().decode(bytes);
   }
   const line = text.split(/\r?\n/).map((l) => l.trim()).find((l) => l.startsWith('AGE-SECRET-KEY-'));
-  if (!line) throw new Error('Ce fichier n’est pas votre fichier clé. Choisissez « cle-dictavocat.age ».');
+  if (!line) throw new Error('Ce fichier n’est pas votre clé d’accès. Choisissez « cle-dictavocat.age ».');
   return line;
 }
 
@@ -288,21 +291,21 @@ const MIME = { pdf: 'application/pdf', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav:
 async function downloadPage() {
   await loadConfig().catch(() => {});
   if (!downloadId || !downloadToken) {
-    page('download', `<h1>Lien incomplet</h1><p class="lead">Ouvrez le lien reçu par e-mail en cliquant directement dessus.</p>`);
+    page('download', `<h1>Lien incomplet</h1><p class="lead">Ouvrez le lien de l’e-mail « Nouvelles dictées à récupérer » en cliquant directement dessus.</p>`);
     return;
   }
   let keyFile = null;
 
   page('download', `
-    <h1>Un dépôt vous attend</h1>
-    <p class="lead">Pour l’ouvrir :</p>
+    <h1>De nouvelles dictées vous attendent</h1>
+    <p class="lead">Pour les récupérer :</p>
     <form id="open-form" novalidate>
       <ol class="steps">
         <li>
           <span class="num">1</span>
           <div class="step-body">
-            <p class="step-title">Votre fichier clé</p>
-            <button type="button" class="btn btn-secondary" id="pick-key">${icons.key}Choisir le fichier clé</button>
+            <p class="step-title">Votre clé d’accès</p>
+            <button type="button" class="btn btn-secondary" id="pick-key">${icons.key}Choisir la clé d’accès</button>
             <input id="key" type="file" hidden>
             <p class="hint" id="key-name">Il s’appelle « cle-dictavocat.age » et se trouve dans vos Documents.</p>
           </div>
@@ -310,7 +313,7 @@ async function downloadPage() {
         <li>
           <span class="num">2</span>
           <div class="step-body">
-            <label class="step-title" for="pass">Votre phrase secrète</label>
+            <label class="step-title" for="pass">Votre mot de passe</label>
             <div class="pass-row">
               <input id="pass" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="mot-mot-mot-…">
               <button type="button" class="btn-ghost" id="toggle" aria-pressed="false">Afficher</button>
@@ -319,16 +322,16 @@ async function downloadPage() {
         </li>
         <li>
           <span class="num">3</span>
-          <div class="step-body"><button type="submit" class="btn btn-primary btn-big" id="open">Ouvrir le dépôt</button></div>
+          <div class="step-body"><button type="submit" class="btn btn-primary btn-big" id="open">Récupérer les dictées</button></div>
         </li>
       </ol>
       <div id="status" class="status" role="alert"></div>
     </form>
-    <details class="advanced"><summary>Option avancée</summary>
-      <p>Télécharger le fichier encore chiffré, pour l’ouvrir avec l’outil <code>age</code>.</p>
-      <button id="raw" type="button" class="btn btn-ghost">Télécharger le fichier chiffré</button>
+    <details class="advanced"><summary>Réservé à l’assistance</summary>
+      <p>Télécharger le fichier encore verrouillé, pour l’ouvrir avec l’outil <code>age</code>.</p>
+      <button id="raw" type="button" class="btn btn-ghost">Télécharger le fichier verrouillé</button>
     </details>`,
-    'Votre clé et votre phrase secrète restent sur cet ordinateur.');
+    'Votre clé d’accès et votre mot de passe ne quittent pas cet ordinateur.');
 
   const status = document.querySelector('#status');
   const setStatus = (cls, html) => { status.className = `status ${cls}`; status.innerHTML = html; };
@@ -358,7 +361,7 @@ async function downloadPage() {
     });
     if (!response.ok) {
       const result = await response.json().catch(() => ({}));
-      throw new Error(result.error || 'Lien expiré ou inutilisable.');
+      throw new Error(result.error || 'Ce lien a expiré ou n’est plus utilisable. Demandez un nouvel envoi des dictées.');
     }
     const total = Number(response.headers.get('content-length')) || 0;
     const reader = response.body.getReader();
@@ -383,13 +386,13 @@ async function downloadPage() {
 
   document.querySelector('#open-form').addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (!keyFile) { setStatus('error', 'Commencez par choisir votre fichier clé (étape 1).'); return; }
-    if (!pass.value.trim()) { setStatus('error', 'Saisissez votre phrase secrète (étape 2).'); pass.focus(); return; }
+    if (!keyFile) { setStatus('error', 'Commencez par choisir votre clé d’accès (étape 1).'); return; }
+    if (!pass.value.trim()) { setStatus('error', 'Tapez votre mot de passe (étape 2).'); pass.focus(); return; }
     lock(true);
     let encrypted = null;
     try {
       // Check the key and passphrase BEFORE downloading, so a typo does not use up a download.
-      progressUI('Vérification de la phrase secrète… (quelques secondes)', 5);
+      progressUI('Vérification du mot de passe… (quelques secondes)', 5);
       const identity = await readIdentity(keyFile, pass.value);
       progressUI('Téléchargement…', 15);
       encrypted = await fetchDeposit((r) => progressUI(`Téléchargement… ${Math.round(r * 100)} %`, 15 + Math.round(r * 75)));
@@ -401,15 +404,15 @@ async function downloadPage() {
       catch { throw new Error('WRONG_KEY'); }
       const d = new Date();
       const pad = (n) => String(n).padStart(2, '0');
-      const zipName = `depot-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}h${pad(d.getMinutes())}.zip`;
+      const zipName = `dictees-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}h${pad(d.getMinutes())}.zip`;
       saveBlob(new Blob([archive], { type: 'application/zip' }), zipName);
       let contents = [];
       try { contents = Object.entries(unzipSync(archive)).filter(([n]) => !n.endsWith('/')); } catch { /* keep the ZIP only */ }
       renderOpened(zipName, contents);
     } catch (error) {
       if (error.message === 'WRONG_KEY' && encrypted) {
-        saveBlob(new Blob([encrypted]), 'depot.age');
-        setStatus('error', 'Ce dépôt n’a pas pu être ouvert avec cette clé. Le fichier chiffré « depot.age » a été enregistré dans Téléchargements : prévenez l’administrateur.');
+        saveBlob(new Blob([encrypted]), 'dictees.age');
+        setStatus('error', `Ces dictées ne s’ouvrent pas avec cette clé d’accès. Le fichier verrouillé « dictees.age » a été enregistré dans Téléchargements. ${help()}`);
       } else {
         setStatus('error', escapeHtml(error.message));
         lock(false);
@@ -420,8 +423,8 @@ async function downloadPage() {
   document.querySelector('#raw').addEventListener('click', async () => {
     lock(true);
     try {
-      saveBlob(new Blob([await fetchDeposit((r) => progressUI(`Téléchargement… ${Math.round(r * 100)} %`, Math.round(r * 100)))]), 'depot.age');
-      setStatus('success', 'Téléchargement terminé. Le fichier est chiffré.');
+      saveBlob(new Blob([await fetchDeposit((r) => progressUI(`Téléchargement… ${Math.round(r * 100)} %`, Math.round(r * 100)))]), 'dictees.age');
+      setStatus('success', 'Téléchargement terminé. Le fichier est encore verrouillé.');
     } catch (error) {
       setStatus('error', escapeHtml(error.message));
       lock(false);
@@ -435,11 +438,11 @@ async function downloadPage() {
     }).join('');
     page('download', `
       <div class="result ok">${icons.check}
-        <h1>Dépôt ouvert</h1>
+        <h1>Dictées récupérées</h1>
         <p class="lead">${contents.length ? `${plural(contents.length, 'fichier')}. ` : ''}Une copie complète a été enregistrée dans <strong>Téléchargements</strong>&nbsp;: <strong>${escapeHtml(zipName)}</strong>.</p>
       </div>
       ${contents.length ? `<p class="sub">Vous pouvez aussi enregistrer les fichiers un par un&nbsp;:</p><ul class="files">${items}</ul>` : ''}`,
-      'Gardez l’e-mail jusqu’à avoir vérifié les fichiers : son lien peut servir deux fois au total.');
+      'Gardez l’e-mail jusqu’à avoir vérifié les fichiers : son lien peut servir deux fois.');
     for (const btn of document.querySelectorAll('.save')) {
       btn.addEventListener('click', () => {
         const [name, data] = contents[Number(btn.dataset.i)];
