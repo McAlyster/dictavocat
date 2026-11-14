@@ -29,6 +29,7 @@ try {
 } catch (error) {
   console.error('Échec :', error.code || '', error.message);
   if (error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') console.error('→ port bloqué ou mauvais hôte/port (essayez 587 ou 465).');
+  if (/wrong version number/i.test(error.message)) console.error('→ SMTP_SECURE ne correspond pas au port : 465 → SMTP_SECURE=true ; 587 → SMTP_SECURE=false.');
   if (error.code === 'EAUTH') console.error('→ identifiant ou mot de passe refusé.');
   process.exit(1);
 }

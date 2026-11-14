@@ -324,24 +324,25 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && (pathname === '/' || pathname === '/download' || pathname.startsWith('/download/'))) {
-    return serveStatic(res, 'index.html');
+  const isRead = req.method === 'GET' || req.method === 'HEAD';
+  if (isRead && (pathname === '/' || pathname === '/download' || pathname.startsWith('/download/'))) {
+    return serveStatic(res, 'index.html', req.method === 'HEAD');
   }
-  if (req.method === 'GET' && /^\/(assets\/|favicon\.ico$)/.test(pathname)) {
-    return serveStatic(res, pathname.slice(1));
+  if (isRead && /^\/(assets\/|favicon\.ico$)/.test(pathname)) {
+    return serveStatic(res, pathname.slice(1), req.method === 'HEAD');
   }
   return clientError(res, 404, 'Introuvable.');
 });
 
-async function serveStatic(res, relative) {
+async function serveStatic(res, relative, headOnly = false) {
   const root = resolve('./dist');
   const file = resolve(root, relative);
   if (!file.startsWith(root + '/') && file !== root) return clientError(res, 404, 'Introuvable.');
   try {
     const body = await readFile(file);
     const type = extname(file) === '.html' ? 'text/html; charset=utf-8' : extname(file) === '.js' ? 'text/javascript; charset=utf-8' : extname(file) === '.css' ? 'text/css; charset=utf-8' : 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
-    res.end(body);
+    res.writeHead(200, { 'Content-Type': type, 'Content-Length': body.length, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+    res.end(headOnly ? undefined : body);
   } catch { clientError(res, 404, 'Fichier introuvable.'); }
 }
 
