@@ -8,7 +8,7 @@ COPY src ./src
 RUN npm run build
 
 FROM node:22-alpine
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data TRUST_PROXY=always
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --omit=optional && npm cache clean --force

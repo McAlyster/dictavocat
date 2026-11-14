@@ -27,6 +27,28 @@ const completedDownloads = new Map();
 const metadataWriteQueues = new Map();
 const ageHeader = Buffer.from('age-encryption.org/v1\n');
 
+// ---------- Anti-abuse limits (all configurable in .env) ----------
+const int = (value, fallback) => (Number.isFinite(Number(value)) && value !== '' && value !== undefined ? Number(value) : fallback);
+const limits = {
+  authFailLimit: int(env.AUTH_FAIL_LIMIT, 5),
+  authBlockMs: int(env.AUTH_BLOCK_MINUTES, 15) * 60_000,
+  uploadsPerHour: int(env.UPLOADS_PER_HOUR, 20),
+  uploadsPerDay: int(env.UPLOADS_PER_DAY, 100),
+  maxStoredBytes: int(env.MAX_STORED_BYTES, 2 * 1024 ** 3),
+  maxPending: int(env.MAX_PENDING_DEPOSITS, 50),
+  maxConcurrent: int(env.MAX_CONCURRENT_UPLOADS, 2),
+  downloadsPerHourPerIp: int(env.DOWNLOADS_PER_HOUR_PER_IP, 30),
+  headersTimeoutMs: int(env.HEADERS_TIMEOUT_SECONDS, 10) * 1000,
+  requestTimeoutMs: int(env.UPLOAD_TIMEOUT_MINUTES, 30) * 60_000
+};
+// Which X-Forwarded-For to believe: 'loopback' (default, proxy on the same machine),
+// 'always' (app reachable only through the proxy, e.g. container port bound to 127.0.0.1), 'never'.
+const trustProxy = ['loopback', 'always', 'never'].includes(env.TRUST_PROXY) ? env.TRUST_PROXY : 'loopback';
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+const hits = new Map();
+let activeUploads = 0;
+
 if (!uploadToken || Buffer.byteLength(uploadToken) < 32) throw new Error('UPLOAD_TOKEN must contain at least 32 bytes.');
 if (!/^age1[023456789acdefghjklmnpqrstuvwxyz]{50,}$/.test(recipient)) throw new Error('AGE_RECIPIENT must be a valid age recipient.');
 // HTTPS is required, except http://localhost for local testing.
@@ -43,6 +65,52 @@ const transporter = nodemailer.createTransport({
   auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD || '' } : undefined,
   tls: { minVersion: 'TLSv1.2' }
 });
+
+function clientIp(req) {
+  const remote = (req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+  const isLoopback = remote === '127.0.0.1' || remote === '::1';
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && (trustProxy === 'always' || (trustProxy === 'loopback' && isLoopback))) {
+    // The right-most entry is the one added by our own proxy.
+    const last = forwarded.split(',').map((v) => v.trim()).filter(Boolean).pop();
+    if (last) return last.replace(/^::ffff:/, '');
+  }
+  return remote;
+}
+function countRecent(key, windowMs) {
+  const now = Date.now();
+  const list = (hits.get(key) || []).filter((t) => now - t < windowMs);
+  if (list.length) hits.set(key, list); else hits.delete(key);
+  return list.length;
+}
+function record(key) {
+  const list = hits.get(key) || [];
+  list.push(Date.now());
+  hits.set(key, list);
+}
+function pruneHits() {
+  const now = Date.now();
+  for (const [key, list] of hits) if (!list.some((t) => now - t < DAY)) hits.delete(key);
+}
+function tooMany(res, message, retryAfterSeconds) {
+  res.setHeader('Retry-After', String(Math.max(1, Math.ceil(retryAfterSeconds))));
+  return clientError(res, 429, message);
+}
+function isBlocked(ip) { return countRecent(`fail:${ip}`, limits.authBlockMs) >= limits.authFailLimit; }
+function authFailed(ip, where) {
+  record(`fail:${ip}`);
+  console.warn('auth_failed', where, ip);
+}
+async function storageUsage() {
+  let bytes = 0;
+  let deposits = 0;
+  for (const name of await readdir(uploadsDir).catch(() => [])) {
+    if (!name.endsWith('.age') && !name.endsWith('.part')) continue;
+    if (name.endsWith('.age')) deposits++;
+    try { bytes += (await stat(join(uploadsDir, name))).size; } catch { /* removed meanwhile */ }
+  }
+  return { bytes, deposits };
+}
 
 function hashToken(token) { return createHash('sha256').update(token).digest(); }
 function safeEqualHex(a, b) {
@@ -135,12 +203,27 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && pathname === '/api/uploads') {
+    const ip = clientIp(req);
+    if (isBlocked(ip)) return tooMany(res, 'Trop de tentatives avec un lien invalide. Réessayez plus tard.', limits.authBlockMs / 1000);
     const auth = req.headers.authorization;
     const supplied = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null;
     const good = typeof supplied === 'string' && safeEqualHex(hashToken(supplied).toString('hex'), hashToken(uploadToken).toString('hex'));
-    if (!good) return clientError(res, 401, 'Lien de dépôt invalide.');
+    if (!good) { authFailed(ip, 'upload'); return clientError(res, 401, 'Lien de dépôt invalide.'); }
     const contentLength = Number(req.headers['content-length'] || 0);
     if (contentLength && contentLength > maxUploadBytes) return clientError(res, 413, 'Le dépôt dépasse la limite autorisée.');
+    if (activeUploads >= limits.maxConcurrent) return tooMany(res, 'Un autre envoi est en cours. Réessayez dans un instant.', 30);
+    if (countRecent('upload', HOUR) >= limits.uploadsPerHour || countRecent('upload', DAY) >= limits.uploadsPerDay) {
+      console.warn('rate_limited', 'upload', ip);
+      return tooMany(res, 'Le nombre maximal d’envois est atteint pour le moment. Réessayez plus tard ou prévenez l’administrateur.', 600);
+    }
+    const usage = await storageUsage();
+    if (usage.deposits >= limits.maxPending || usage.bytes + (contentLength || maxUploadBytes) > limits.maxStoredBytes) {
+      console.warn('storage_full', usage.deposits, usage.bytes);
+      return clientError(res, 507, 'L’espace de stockage du service est plein. Prévenez l’administrateur.');
+    }
+    record('upload');
+    activeUploads++;
+    res.on('close', () => { activeUploads--; });
     const id = randomUUID();
     const tempPath = join(uploadsDir, `${id}.part`);
     const finalPath = join(uploadsDir, `${id}.age`);
@@ -192,12 +275,16 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && pathname === '/api/download') {
+    const ip = clientIp(req);
+    if (isBlocked(ip)) return tooMany(res, 'Trop de tentatives avec un lien invalide. Réessayez plus tard.', limits.authBlockMs / 1000);
+    if (countRecent(`dl:${ip}`, HOUR) >= limits.downloadsPerHourPerIp) return tooMany(res, 'Trop de demandes. Réessayez dans un moment.', 600);
+    record(`dl:${ip}`);
     let input;
     try { input = await readSmallJson(req); }
     catch { return clientError(res, 400, 'Requête invalide.'); }
     const meta = await loadMetadata(input?.id);
-    if (!meta || meta.expiresAt <= Date.now()) return clientError(res, 410, 'Lien expiré ou indisponible.');
-    if (typeof input?.token !== 'string' || !safeEqualHex(hashToken(input.token).toString('hex'), meta.tokenHash)) return clientError(res, 403, 'Lien invalide.');
+    if (!meta || meta.expiresAt <= Date.now()) { authFailed(ip, 'download'); return clientError(res, 410, 'Lien expiré ou indisponible.'); }
+    if (typeof input?.token !== 'string' || !safeEqualHex(hashToken(input.token).toString('hex'), meta.tokenHash)) { authFailed(ip, 'download'); return clientError(res, 403, 'Lien invalide.'); }
     const used = completedDownloads.has(meta.id) ? completedDownloads.get(meta.id) : meta.downloads;
     const reserved = downloadReservations.get(meta.id) || 0;
     if (used + reserved >= maxDownloads) return clientError(res, 410, 'Le nombre de téléchargements autorisés est atteint.');
@@ -258,6 +345,8 @@ async function serveStatic(res, relative) {
   } catch { clientError(res, 404, 'Fichier introuvable.'); }
 }
 
-setInterval(() => { expireOldDeposits().catch(() => {}); }, 60_000).unref();
+setInterval(() => { expireOldDeposits().catch(() => {}); pruneHits(); }, 60_000).unref();
 await expireOldDeposits();
+server.headersTimeout = limits.headersTimeoutMs;
+server.requestTimeout = limits.requestTimeoutMs;
 server.listen(port, host, () => console.log(`dictavocat listening on ${host}:${port}`));

@@ -43,6 +43,8 @@ Le jeton de dépôt est transmis dans l'en-tête `Authorization`. Si vous utilis
 - Une suppression automatique purge les dépôts expirés chaque minute, ainsi que les envois interrompus (`.part` de plus d'une heure) et les fichiers chiffrés orphelins. À la seconde utilisation, le dépôt est supprimé.
 - Les métadonnées et l'adresse IP peuvent apparaître dans les journaux du proxy/VPS. Ne pas activer de journaux contenant les URL complètes ou les corps de requête.
 - Le jeton de dépôt est mémorisé dans le navigateur de l'avocate (`localStorage`) après la première ouverture du lien, pour qu'une actualisation ou un favori sans jeton fonctionne. À n'utiliser que sur son propre poste.
+- Limites anti-abus : blocage d'une IP après 5 jetons invalides (15 min), 20 dépôts par heure et 100 par jour au total, 2 envois simultanés, 2 Gio et 50 dépôts en attente au maximum, 30 demandes de téléchargement par heure et par IP, délais de connexion. Tout est réglable dans `.env`. Les échecs sont journalisés (`auth_failed <route> <ip>`), ce qui permet d'ajouter fail2ban.
+- L'IP du visiteur est lue dans `X-Forwarded-For` (entrée la plus à droite) selon `TRUST_PROXY`. L'image Docker utilise `always`, car son port n'est publié que sur `127.0.0.1`, derrière le proxy.
 - Aucun compte secrétaire, antivirus, reprise d'envoi interrompu, tableau de bord ou sauvegarde n'est inclus dans ce MVP.
 
 ## Déchiffrer

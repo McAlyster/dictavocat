@@ -97,6 +97,7 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;   # IP réelle, pour les limites anti-abus
     }
 }
 ```
