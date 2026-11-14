@@ -11,3 +11,6 @@ documents
 Claude outputs
 .env.test
 data-test
+*.swp
+*.swo
+*~
