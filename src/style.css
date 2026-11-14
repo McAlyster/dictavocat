@@ -112,3 +112,32 @@ code { font-size: .9em; background: var(--soft); padding: 1px 6px; border-radius
   .file-size { grid-area: size; }
   .remove, .save { grid-area: btn; align-self: center; padding: 8px 10px; }
 }
+
+/* ---------- Secretary side: black & blue, high contrast ---------- */
+body.download {
+  color-scheme: dark;
+  --ink: #f2f5f8; --muted: #a3b0bd; --line: #26303c; --soft: #141a22;
+  --green: #1f6feb; --green-dark: #7cb7ff; --green-soft: #10223d;
+  --red: #ff8a80; --red-soft: #2e1216; --amber: #f2b84b;
+  background: #05070a; color: var(--ink);
+}
+body.download .card { background: #0c1117; border-color: #1d2733; box-shadow: 0 16px 48px #0008, 0 0 0 1px #1f6feb22; }
+body.download .brand { color: #7cb7ff; letter-spacing: .01em; }
+body.download .btn-primary { background: #1f6feb; color: #fff; }
+body.download .btn-primary:hover:not(:disabled) { background: #3b82f6; }
+body.download .btn-secondary { background: transparent; color: #7cb7ff; border-color: #1f6feb; }
+body.download .btn-secondary:hover:not(:disabled) { background: #10223d; }
+body.download .btn-ghost { color: #7cb7ff; }
+body.download .num { background: #1f6feb; box-shadow: 0 0 0 4px #1f6feb33; }
+body.download .pass-row input { background: #05070a; color: var(--ink); border-color: #33404f; }
+body.download .pass-row input::placeholder { color: #6b7886; }
+body.download .pass-row input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #1f6feb44; }
+body.download .remove, body.download .save { background: transparent; color: var(--ink); }
+body.download .save { border-color: #1f6feb; color: #7cb7ff; }
+body.download .save:hover { background: #10223d; }
+body.download .file-icon.audio { background: #10223d; color: #7cb7ff; }
+body.download .file-icon.doc { background: #1a1f2b; color: #c3cfdb; }
+body.download .result.ok > svg { color: #1f6feb; filter: drop-shadow(0 0 18px #1f6feb55); }
+body.download progress { background: #141a22; }
+body.download progress::-webkit-progress-bar { background: #141a22; }
+body.download .status.success { color: #7cb7ff; }
