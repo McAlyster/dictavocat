@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "test:local": "vite build && node --env-file=.env.test server.mjs"
   },
   "dependencies": {
     "age-encryption": "0.3.1",

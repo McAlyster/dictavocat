@@ -31,6 +31,12 @@ sentier serpent singe sirop soleil sorbet source spatule stylo sucre tambour tap
 tomate tonneau torrent tortue toupie tracteur train trefle trompette tulipe vague valise vanille velo
 verger violon volcan wagon yaourt zebre`.split(/\s+/).filter(Boolean);
 
+const out = 'cles/cle-dictavocat.age';
+if (existsSync(out)) {
+  console.error(`${out} existe déjà : déplacez-le ou supprimez-le avant d'en générer une nouvelle.`);
+  process.exit(1);
+}
+
 const unique = [...new Set(WORDS)];
 const count = 7; // 7 mots parmi ~240 ≈ 55 bits, renforcés par scrypt (dérivation lente).
 const passphrase = Array.from({ length: count }, () => unique[randomInt(unique.length)]).join('-');
@@ -44,11 +50,6 @@ const now = new Date().toISOString().slice(0, 10);
 const keyFile = await encrypter.encrypt(`# Clé privée Dictavocat, créée le ${now}\n# Clé publique : ${recipient}\n${identity}\n`);
 
 await mkdir('cles', { recursive: true, mode: 0o700 });
-const out = 'cles/cle-dictavocat.age';
-if (existsSync(out)) {
-  console.error(`${out} existe déjà : déplacez-le ou supprimez-le avant d'en générer une nouvelle.`);
-  process.exit(1);
-}
 await writeFile(out, keyFile, { mode: 0o600, flag: 'wx' });
 
 console.log(`

@@ -113,6 +113,21 @@ Une fois ce lien ouvert, l'ordinateur s'en souvient : un favori vers `https://de
 
 Pour afficher le nom du cabinet en haut des pages, renseignez `OFFICE_NAME` dans `.env`.
 
+### Raccourci sur le dictaphone (recommandé)
+
+Le plus simple pour l'avocate : un raccourci « Envoyer mes dictées » à la racine du dictaphone. Dictaphone branché sur le Mac :
+
+```sh
+node tools/raccourci-depot.mjs /Volumes/<NOM_DU_DICTAPHONE>
+dot_clean /Volumes/<NOM_DU_DICTAPHONE>   # retire les fichiers « ._ » créés par macOS
+```
+
+Le script lit `PUBLIC_BASE_URL` et `UPLOAD_TOKEN` dans `.env`. Il n'affiche pas le jeton. Sous Windows, un double-clic sur le raccourci ouvre la page de dépôt, et le navigateur retient le jeton pour la suite.
+
+À savoir :
+- Le jeton ne permet que de déposer. En cas de perte du dictaphone, changez `UPLOAD_TOKEN`, redémarrez le service, puis réécrivez le raccourci.
+- Un formatage du dictaphone (menu « Format ») efface le raccourci.
+
 ## 7. Recette avant usage réel (avec des fichiers factices)
 
 1. Depuis le navigateur de l'avocate : déposer un MP3 et un PDF factices → message « Dépôt envoyé ».

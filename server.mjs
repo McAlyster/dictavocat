@@ -29,7 +29,8 @@ const ageHeader = Buffer.from('age-encryption.org/v1\n');
 
 if (!uploadToken || Buffer.byteLength(uploadToken) < 32) throw new Error('UPLOAD_TOKEN must contain at least 32 bytes.');
 if (!/^age1[023456789acdefghjklmnpqrstuvwxyz]{50,}$/.test(recipient)) throw new Error('AGE_RECIPIENT must be a valid age recipient.');
-if (!/^https:\/\//.test(baseUrl)) throw new Error('PUBLIC_BASE_URL must use HTTPS.');
+// HTTPS is required, except http://localhost for local testing.
+if (!/^https:\/\//.test(baseUrl) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(baseUrl)) throw new Error('PUBLIC_BASE_URL must use HTTPS.');
 if (!secretaryEmail || !mailFrom || !env.SMTP_HOST) throw new Error('Configure SECRETARY_EMAIL, MAIL_FROM and SMTP_HOST.');
 
 await mkdir(uploadsDir, { recursive: true, mode: 0o700 });

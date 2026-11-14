@@ -9,3 +9,5 @@ tools
 documents
 .DS_Store
 Claude outputs
+.env.test
+data-test
