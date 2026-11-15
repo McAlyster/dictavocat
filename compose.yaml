@@ -12,6 +12,11 @@ services:
       - /tmp
     security_opt:
       - no-new-privileges:true
+    logging:                 # journaux limités : ils contiennent des adresses IP (RGPD)
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
 
 volumes:
   dictavocat-data:
