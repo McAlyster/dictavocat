@@ -1,58 +1,75 @@
-# Dépôt sécurisé de dictées
+# Dictavocat : envoi chiffré de dictées
 
-MVP auto-hébergé : les fichiers sont archivés et chiffrés dans le navigateur avec la clé publique `age` de la secrétaire. Le serveur ne conserve que le fichier `.age` chiffré et des métadonnées minimales. Le lien reçu par la secrétaire est un jeton temporaire de téléchargement, distinct de la clé privée.
+L'avocate envoie ses dictées (MP3, PDF) depuis son navigateur. Avant l'envoi, le navigateur les regroupe et les chiffre au format [age](https://age-encryption.org) avec la clé publique de la secrétaire. Le serveur ne stocke que le fichier chiffré `.age` et quelques métadonnées. La secrétaire reçoit un e-mail avec un lien temporaire, et c'est son propre navigateur qui déchiffre les dictées grâce à sa clé d'accès et à son mot de passe.
 
-## Avant mise en service
+Production : https://dict.leataieb-avocat.fr. L'installation et l'exploitation sont décrites dans **[DEPLOY.md](DEPLOY.md)**.
 
-Ce MVP n'a pas encore fait l'objet d'une revue de sécurité ni d'essais d'intégration. Ne l'exposez pas à des dossiers réels avant revue, vérification sur le navigateur Windows cible et configuration de TLS, SMTP, permissions et rétention. Le code de chiffrement est livré par le VPS : l'administrateur et la sécurité du VPS font donc partie de la chaîne de confiance.
+## Vocabulaire de l'interface
 
-## Préparer la clé de la secrétaire
+| Dans le code | À l'écran |
+|---|---|
+| dépôt, upload | « Envoyer des dictées », « C'est envoyé » |
+| jeton de dépôt (`UPLOAD_TOKEN`) | caché dans le raccourci « Envoyer mes dictées » du dictaphone |
+| identité age (`cle-dictavocat.age`) | « Votre clé d'accès » |
+| phrase de passe de l'identité | « Votre mot de passe » |
+| téléchargement + déchiffrement | « Récupérer les dictées », « Dictées récupérées » |
 
-`node tools/generer-cle.mjs` crée `cles/cle-dictavocat.age`, une identité age protégée par une phrase secrète, et affiche la clé publique à mettre dans `AGE_RECIPIENT`. Transmettre le fichier et la phrase par deux canaux distincts. Une identité créée avec `age-keygen` (non protégée) est aussi acceptée.
+## Chaîne de confiance
 
-Le fichier et sa phrase sont irrécupérables s'ils sont perdus. Conserver une sauvegarde et la tester avant d'utiliser le service.
+Le code de chiffrement est servi par le VPS. L'administrateur et la sécurité du VPS font donc partie de la chaîne de confiance. Le serveur ne voit jamais les fichiers en clair, ni la clé d'accès, ni le mot de passe.
+
+Les secrets passent dans le fragment de l'URL (`#upload=…`, `#t=…`). Le navigateur n'envoie jamais ce fragment au serveur : la page le lit, puis l'efface de la barre d'adresse. Le jeton n'est ensuite transmis que dans l'en-tête `Authorization`.
+
+## Clé de la secrétaire
+
+`node tools/generer-cle.mjs` crée `cles/cle-dictavocat.age` : une identité age protégée par un mot de passe de 7 mots. Le script affiche aussi la clé publique à mettre dans `AGE_RECIPIENT`. Le fichier et le mot de passe doivent partir par deux canaux distincts. Une identité non protégée créée avec `age-keygen` fonctionne aussi.
+
+Si le fichier ou le mot de passe est perdu, rien ne peut être récupéré. Gardez-en une copie dans un coffre, et testez-la avant la mise en service.
+
+## Outils
+
+| Commande | Rôle |
+|---|---|
+| `node tools/generer-cle.mjs` | crée la clé d'accès de la secrétaire |
+| `node tools/raccourci-depot.mjs /Volumes/WS-882 [--env .env.test]` | écrit le raccourci `Envoyer mes dictées.url` sur le dictaphone |
+| `docker compose run --rm -v ./tools:/app/tools:ro dictavocat node tools/test-smtp.mjs` | vérifie le SMTP et envoie un e-mail de test |
+| `npm run test:local` | build et serveur local avec `.env.test` |
 
 ## Configuration
 
-1. Copier `.env.example` vers `.env` et remplacer les valeurs.
-2. Générer `UPLOAD_TOKEN` avec `openssl rand -hex 32`. Le lien communiqué à l'avocate est `https://votre-domaine/#upload=VALEUR_DU_TOKEN` ; elle peut le conserver en favori.
-3. Renseigner `AGE_RECIPIENT` avec la clé publique age de la secrétaire.
-4. Renseigner le relais SMTP. Le courriel ne contiendra aucun nom de fichier, contenu ou pièce jointe.
-5. Adapter `PUBLIC_BASE_URL`, `SECRETARY_EMAIL`, `MAIL_FROM` et le nom de domaine dans `Caddyfile.example`.
-6. Vérifier que le volume `/data` est sur un disque chiffré si cela fait partie du modèle de menace souhaité. L'application ne configure aucune sauvegarde.
+Toutes les variables sont décrites dans `.env.example`. Les plus importantes :
 
-## Lancement
+- `PUBLIC_BASE_URL`, `UPLOAD_TOKEN` (`openssl rand -hex 32`) et `AGE_RECIPIENT` ;
+- `OFFICE_NAME` : nom affiché en haut des pages et dans l'e-mail ;
+- `SUPPORT_CONTACT` : contact affiché dans les messages d'erreur et l'e-mail ;
+- `SECRETARY_EMAIL`, `MAIL_FROM` et `SMTP_*` : l'e-mail ne contient aucun nom de fichier, aucun contenu, aucune pièce jointe ;
+- `HOST_PORT` : port local de l'hôte vers lequel le proxy transmet les requêtes.
 
-```sh
-cp .env.example .env
-# Modifier .env avec un éditeur local.
-docker compose up -d --build
-```
+Le conteneur publie son port uniquement sur `127.0.0.1`. Un reverse proxy TLS se place devant : nginx en production (configuration dans `DEPLOY.md`), ou Caddy (`Caddyfile.example`). La limite de taille des requêtes du proxy doit dépasser `MAX_UPLOAD_BYTES`. Attention, Caddy compte en unités décimales : `130MB` font 130 000 000 octets, alors que la valeur par défaut de `MAX_UPLOAD_BYTES` est de 120 Mio, soit 125 829 120 octets. Aucun proxy ne doit journaliser l'en-tête `Authorization` ni les URL complètes.
 
-Configurer le reverse proxy TLS (exemple Caddy dans `Caddyfile.example`) et limiter l'accès réseau au port 8080, qui est publié uniquement sur localhost. Pour Caddy, la limite du corps doit être supérieure à `MAX_UPLOAD_BYTES` : Caddy compte en unités décimales (`130MB` = 130 000 000 octets) alors que la valeur par défaut de `MAX_UPLOAD_BYTES` est 120 Mio (125 829 120 octets).
+## Fonctionnement et limites
 
-Le jeton de dépôt est transmis dans l'en-tête `Authorization`. Si vous utilisez un autre proxy que Caddy, vérifiez qu'il ne journalise pas cet en-tête.
+- Le navigateur de l'avocate fabrique une archive ZIP sans compression, puis la chiffre. La taille est limitée à 120 Mio par envoi. Le navigateur peut utiliser temporairement plusieurs fois cette taille en mémoire. L'avancement s'affiche pendant l'envoi.
+- Le serveur vérifie la taille et l'en-tête age pendant la réception, enregistre le fichier sous un identifiant aléatoire, puis envoie l'e-mail.
+- Si l'envoi de l'e-mail échoue, la dictée reste enregistrée et l'interface le signale. L'e-mail n'est pas renvoyé automatiquement.
+- Le lien de la secrétaire expire au bout de 72 h et sert deux fois. Ouvrir le lien ne compte pas comme un usage. Le mot de passe est vérifié **avant** le téléchargement, donc une faute de frappe ne consomme rien.
+- Une purge tourne chaque minute : elle supprime les dictées expirées, les envois interrompus (fichiers `.part` de plus d'une heure) et les fichiers orphelins. Une dictée est supprimée dès son dernier téléchargement.
+- Le jeton est mémorisé dans le navigateur de l'avocate (`localStorage`). Une actualisation de la page ou un favori sans jeton fonctionnent donc. À réserver à son propre poste.
+- Limites anti-abus :
+  - blocage d'une IP après 5 jetons invalides, pendant 15 min ;
+  - 20 envois par heure et 100 par jour au total, 2 envois simultanés au maximum ;
+  - au plus 2 Gio stockés et 50 dictées en attente ;
+  - 30 demandes de téléchargement par heure et par IP ;
+  - délais maximaux de connexion.
 
-## Fonctionnement et limites du MVP
+  Tout se règle dans `.env`. Les échecs sont journalisés (`auth_failed <route> <ip>`), ce qui permet d'ajouter fail2ban.
+- L'IP du visiteur est lue dans `X-Forwarded-For` (entrée la plus à droite), selon `TRUST_PROXY`. L'image Docker utilise `always` : son port n'est publié que sur `127.0.0.1`, derrière le proxy.
+- Ce MVP n'a ni comptes utilisateurs, ni antivirus, ni reprise d'un envoi interrompu, ni tableau de bord, ni sauvegarde.
 
-- L'avocate choisit les MP3/PDF, puis le navigateur fabrique une archive ZIP sans compression et la chiffre au format `age`.
-- Taille maximale par dépôt : 120 Mio par défaut. La création ZIP lit les fichiers côté navigateur et peut temporairement utiliser plusieurs fois leur taille en mémoire.
-- Le navigateur vérifie la taille finale (après ZIP et chiffrement) avant l'envoi. Le serveur vérifie l'en-tête age, stocke sous un identifiant aléatoire et envoie le courriel seulement après l'enregistrement.
-- En cas d'échec SMTP, le dépôt reste enregistré et l'interface le signale, mais la notification n'est pas automatiquement renvoyée.
-- Le lien secrétaire expire après 72 h par défaut et autorise deux téléchargements terminés. Une ouverture du lien ne consomme pas d'usage ; seul le clic sur « Télécharger » envoie le jeton au serveur.
-- Une suppression automatique purge les dépôts expirés chaque minute, ainsi que les envois interrompus (`.part` de plus d'une heure) et les fichiers chiffrés orphelins. À la seconde utilisation, le dépôt est supprimé.
-- Les métadonnées et l'adresse IP peuvent apparaître dans les journaux du proxy/VPS. Ne pas activer de journaux contenant les URL complètes ou les corps de requête.
-- Le jeton de dépôt est mémorisé dans le navigateur de l'avocate (`localStorage`) après la première ouverture du lien, pour qu'une actualisation ou un favori sans jeton fonctionne. À n'utiliser que sur son propre poste.
-- Limites anti-abus : blocage d'une IP après 5 jetons invalides (15 min), 20 dépôts par heure et 100 par jour au total, 2 envois simultanés, 2 Gio et 50 dépôts en attente au maximum, 30 demandes de téléchargement par heure et par IP, délais de connexion. Tout est réglable dans `.env`. Les échecs sont journalisés (`auth_failed <route> <ip>`), ce qui permet d'ajouter fail2ban.
-- L'IP du visiteur est lue dans `X-Forwarded-For` (entrée la plus à droite) selon `TRUST_PROXY`. L'image Docker utilise `always`, car son port n'est publié que sur `127.0.0.1`, derrière le proxy.
-- Aucun compte secrétaire, antivirus, reprise d'envoi interrompu, tableau de bord ou sauvegarde n'est inclus dans ce MVP.
+## Déchiffrer sans la page
 
-## Déchiffrer
-
-Par défaut, la page de téléchargement déchiffre le dépôt dans le navigateur de la secrétaire : elle choisit son fichier clé et saisit sa phrase secrète. La phrase est vérifiée **avant** le téléchargement, donc une faute de frappe ne consomme pas d'usage. Le ZIP en clair est ensuite enregistré dans *Téléchargements*. Ni la clé ni la phrase ne quittent le navigateur, mais le code de la page est servi par le VPS (voir « Avant mise en service »).
-
-Option avancée, avec l'outil `age` :
+Si la page ne parvient pas à ouvrir les dictées, elle enregistre le fichier verrouillé `dictees.age`. On peut alors l'ouvrir avec l'outil `age` :
 
 ```sh
-age -d -i cle-dictavocat.age -o depot.zip depot.age   # demande la phrase secrète
+age -d -i cle-dictavocat.age -o dictees.zip dictees.age   # demande le mot de passe
 ```
