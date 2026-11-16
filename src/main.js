@@ -97,7 +97,10 @@ function guardLeaving(on) {
 }
 
 async function loadConfig() {
-  const response = await fetch('/api/config', { cache: 'no-store' });
+  // The support contact is only sent back to a visitor holding a valid link.
+  const token = isDownload ? downloadToken : uploadToken;
+  const query = isDownload && downloadId ? `?id=${encodeURIComponent(downloadId)}` : '';
+  const response = await fetch(`/api/config${query}`, { cache: 'no-store', headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!response.ok) throw new Error('Le service est momentanément indisponible. Réessayez dans quelques minutes.');
   const config = await response.json();
   if (config.officeName) officeName = config.officeName;
@@ -116,7 +119,7 @@ async function uploadPage() {
   catch (e) { page('upload', `<div class="result">${icons.warn}<h1>Service indisponible</h1><p class="lead">${escapeHtml(e.message)}</p></div>`); return; }
 
   if (!uploadToken) {
-    page('upload', `<h1>Bienvenue</h1><p class="lead">Pour envoyer vos dictées, branchez le dictaphone et double-cliquez sur « Envoyer mes dictées ».</p><p class="lead">${help()}</p>`);
+    page('upload', `<h1>Bienvenue</h1><p class="lead">Pour envoyer vos dictées, branchez le dictaphone et double-cliquez sur « Envoyer mes dictées ».</p>`);
     return;
   }
 

@@ -201,7 +201,21 @@ const server = createServer(async (req, res) => {
   res.setHeader('X-Frame-Options', 'DENY');
 
   if (req.method === 'GET' && pathname === '/api/config') {
-    return json(res, 200, { recipient, maxUploadBytes, officeName, supportContact });
+    // The support contact (name, phone) is only given to a visitor holding a valid link:
+    // the upload token, or the token of a pending download (?id=…).
+    const auth = req.headers.authorization;
+    const supplied = typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    let known = false;
+    if (supplied) {
+      const hash = hashToken(supplied).toString('hex');
+      known = safeEqualHex(hash, hashToken(uploadToken).toString('hex'));
+      const id = url.searchParams.get('id');
+      if (!known && id && /^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+        const meta = await loadMetadata(id).catch(() => null);
+        known = Boolean(meta?.tokenHash) && safeEqualHex(hash, meta.tokenHash);
+      }
+    }
+    return json(res, 200, { recipient, maxUploadBytes, officeName, supportContact: known ? supportContact : '' });
   }
 
   if (req.method === 'POST' && pathname === '/api/uploads') {
